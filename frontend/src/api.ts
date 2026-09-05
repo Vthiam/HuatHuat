@@ -11,7 +11,7 @@ import type {
   ScheduleStatus,
 } from "./types";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const resp = await fetch(`${BASE_URL}${path}`, {
@@ -49,6 +49,11 @@ export const api = {
     request<Flag[]>(`/api/flags${status ? `?status=${status}` : ""}`),
   acceptFlag: (id: number) => request<Flag>(`/api/flags/${id}/accept`, { method: "POST" }),
   rejectFlag: (id: number) => request<Flag>(`/api/flags/${id}/reject`, { method: "POST" }),
+  selfEditFlag: (id: number, humanEditText: string) =>
+    request<Flag>(`/api/flags/${id}/self-edit`, {
+      method: "POST",
+      body: JSON.stringify({ human_edit_text: humanEditText }),
+    }),
 
   getGraph: (changeEventId: number) => request<Graph>(`/api/graph/${changeEventId}`),
 

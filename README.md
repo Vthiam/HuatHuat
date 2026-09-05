@@ -73,6 +73,60 @@ python -m app.cli review
 
 Every run also writes a timestamped Markdown report to `law_library/reports/`, and — if a flagged document is a real PDF — a highlighted copy with the AI's note attached as an annotation, saved to `law_library/reports/flagged/` (the original PDF is never modified).
 
+## Running the dashboard locally
+
+There's a web dashboard (FastAPI backend + React frontend) as an alternative to the CLI above. It has two tabs: **Library** (every tracked document, its clauses, and what it depends on) and **Review** (pick a detected statute change, see its full impact graph and redline, and accept/reject/self-edit each affected document in one place).
+
+### One-time setup
+
+You need both halves installed once before the one-command script works:
+
+```bash
+# Backend (skip if you already did this in Setup above)
+cd backend
+python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+deactivate
+
+# Frontend
+cd ../frontend
+npm install
+```
+
+### Running both together
+
+From the repo root:
+
+```bash
+./dev.sh
+```
+
+This single command:
+1. Starts the backend (`uvicorn app.main:app --reload`) on **port 8010**, using `backend/venv`.
+2. Starts the frontend dev server (`npm run dev`, Vite) on **port 5173**.
+3. Vite auto-opens your default browser to `http://localhost:5173` the moment it's ready (`server.open: true` in `frontend/vite.config.ts`) — you don't click anything.
+4. Press **Ctrl+C** once in that terminal to stop both processes together (the script traps the interrupt and kills both).
+
+If you'd rather run them in two separate terminals (e.g. to watch backend logs on their own), skip `dev.sh` and run these instead:
+
+```bash
+# Terminal 1
+cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8010
+
+# Terminal 2
+cd frontend && npm run dev
+```
+
+### Troubleshooting
+
+- **"address already in use" on port 8010 or 5173** — something else is already bound to that port. Find and stop it (`lsof -i :8010`), or change the port: edit `BACKEND_PORT` in `dev.sh` for the backend, and pass `--port <n>` to `vite` (via `frontend/vite.config.ts`'s `server.port`) for the frontend — then update `frontend/.env.local`'s `VITE_API_BASE_URL` to match the new backend port.
+- **Browser opens to a blank page / network errors in the console** — the backend probably isn't up yet or crashed on startup; check the terminal output for a Python traceback. `dev.sh` starts both concurrently, so the frontend may load a second or two before the backend finishes starting — just refresh.
+- **`./dev.sh: Permission denied`** — run `chmod +x dev.sh` once.
+- **No documents show up in Library** — the database starts empty. Run `python -m app.dev_seed` (from `backend/`, with `venv` active) to seed the tracked statute, then use the "Run scan (ingest library)" button once you've dropped files into `law_library/inbox/` or `law_library/templates/`.
+
+### Relationship to the GitHub Pages deploy
+
+The frontend can also be published standalone to GitHub Pages via `.github/workflows/deploy-frontend.yml` (triggers on push to `main`). That's a **separate, static-only build** with no backend behind it — useful as a visual showcase of the UI, but it can't fetch real data unless you point `VITE_API_BASE_URL` at a backend you're running and exposing yourself. `./dev.sh` is the actual way to use the tool day-to-day.
+
 ## Running the tests
 
 ```bash

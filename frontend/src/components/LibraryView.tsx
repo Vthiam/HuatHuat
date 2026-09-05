@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, BASE_URL } from "../api";
 import type { Document, DocumentDetail, DocumentText, ScheduleStatus } from "../types";
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export function LibraryView() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -12,6 +10,7 @@ export function LibraryView() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [checking, setChecking] = useState(false);
   const [schedule, setSchedule] = useState<ScheduleStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,6 +70,24 @@ export function LibraryView() {
     }
   };
 
+  const runScan = async () => {
+    setScanning(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.runScan();
+      setMessage(
+        `Scan: ${result.classified_from_inbox.length} classified from inbox, ` +
+          `${result.new_documents.length} new template(s), ${result.edges_created} dependency edge(s) detected.`
+      );
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const checkForUpdates = async () => {
     setChecking(true);
     setError(null);
@@ -83,7 +100,7 @@ export function LibraryView() {
         setMessage("Checked SSO -- no changes to the tracked statute since last check.");
       } else {
         setMessage(
-          `Checked SSO -- ${result.change_events.length} change(s) found, ${result.flags.length} document(s) flagged. See the Change Feed / Review tabs.`
+          `Checked SSO -- ${result.change_events.length} change(s) found, ${result.flags.length} document(s) flagged. See the Review tab.`
         );
       }
     } catch (e) {
@@ -112,6 +129,9 @@ export function LibraryView() {
         />
         <button className="primary" onClick={handleUploadClick} disabled={uploading}>
           {uploading ? "Uploading..." : "Upload document"}
+        </button>
+        <button onClick={runScan} disabled={scanning}>
+          {scanning ? "Scanning..." : "Run scan (ingest library)"}
         </button>
         <button onClick={checkForUpdates} disabled={checking}>
           {checking ? "Checking..." : "Check for law updates"}
@@ -179,12 +199,12 @@ export function LibraryView() {
                 )}
               </div>
 
-              <strong style={{ fontSize: 13 }}>Document content</strong>
+              <div className="panel-title">Document content</div>
               {!preview ? (
                 <div className="empty-state">Loading preview...</div>
               ) : preview.is_pdf && preview.pdf_url ? (
                 <iframe
-                  src={`${API_BASE}${preview.pdf_url}`}
+                  src={`${BASE_URL}${preview.pdf_url}`}
                   title={selected.name}
                   style={{ width: "100%", height: 380, border: "1px solid var(--border)", borderRadius: 8, marginTop: 6 }}
                 />
@@ -196,7 +216,7 @@ export function LibraryView() {
 
               {selected.clauses.length > 0 && (
                 <>
-                  <strong style={{ fontSize: 13, display: "block", marginTop: 14 }}>Clauses</strong>
+                  <div className="panel-title" style={{ marginTop: 18 }}>Clauses</div>
                   {selected.clauses.map((c) => (
                     <div className="clause-block" key={c.id}>
                       <strong>
@@ -210,7 +230,7 @@ export function LibraryView() {
 
               {selected.dependencies.length > 0 && (
                 <>
-                  <strong style={{ fontSize: 13, display: "block", marginTop: 14 }}>Depends on</strong>
+                  <div className="panel-title" style={{ marginTop: 18 }}>Depends on</div>
                   {selected.dependencies.map((e) => (
                     <div className="clause-block" key={e.id}>
                       <strong>

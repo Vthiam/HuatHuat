@@ -1,17 +1,14 @@
 import { useState } from "react";
+import { motion } from "motion/react";
 import "./App.css";
-import { ChangeFeedView } from "./components/ChangeFeedView";
-import { GraphView } from "./components/GraphView";
 import { LibraryView } from "./components/LibraryView";
 import { ReviewView } from "./components/ReviewView";
 
-type Tab = "library" | "changes" | "review" | "graph";
+type Tab = "library" | "review";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "library", label: "Library" },
-  { id: "changes", label: "Change Feed" },
   { id: "review", label: "Review" },
-  { id: "graph", label: "Graph" },
 ];
 
 function App() {
@@ -29,15 +26,20 @@ function App() {
       <div className="tabs">
         {TABS.map((t) => (
           <button key={t.id} className={`tab ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>
-            {t.label}
+            {tab === t.id && (
+              <motion.span
+                layoutId="tab-pill"
+                className="tab-pill"
+                transition={{ type: "spring", bounce: 0.15, duration: 0.4 }}
+              />
+            )}
+            <span className="tab-label">{t.label}</span>
           </button>
         ))}
       </div>
 
       {tab === "library" && <LibraryView />}
-      {tab === "changes" && <ChangeFeedView />}
       {tab === "review" && <ReviewView />}
-      {tab === "graph" && <GraphView />}
     </div>
   );
 }
