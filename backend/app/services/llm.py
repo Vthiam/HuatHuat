@@ -128,18 +128,30 @@ def recommend_impact(
 
     # The heuristic fallback cannot scan a document for conflicting
     # passages -- that requires actual reasoning. It stays honest about
-    # that limit rather than pretending to do the analysis above.
+    # that limit rather than pretending to do the analysis above. Uses the
+    # actual diff ops (what was added/removed), not a naive first-N-chars
+    # truncation of old vs new -- a change near the end of a long clause
+    # (e.g. an appended sentence) would otherwise make truncated old/new
+    # text look identical and say nothing useful.
+    ops = word_diff(old_clause_text, new_clause_text)
+    inserted = " / ".join(o.text for o in ops if o.op == "insert" and o.text.strip())
+    deleted = " / ".join(o.text for o in ops if o.op == "delete" and o.text.strip())
+    change_desc_parts = []
+    if deleted:
+        change_desc_parts.append(f'removed "{deleted[:150]}"')
+    if inserted:
+        change_desc_parts.append(f'added "{inserted[:150]}"')
+    change_desc = " and ".join(change_desc_parts) if change_desc_parts else "text changed"
+
     if path_desc:
         text = (
             f"'{document_name}' depends on this change indirectly via {path_desc}. "
-            f"Section {clause_ref} changed from \"{old_clause_text[:150]}\" to "
-            f"\"{new_clause_text[:150]}\". Automated passage-level comparison requires an "
-            f"API key; manual review of '{document_name}' is recommended."
+            f"Section {clause_ref} changed: {change_desc}. Automated passage-level comparison "
+            f"requires an API key; manual review of '{document_name}' is recommended."
         )
     else:
         text = (
-            f"'{document_name}' cites section {clause_ref}, which changed from "
-            f"\"{old_clause_text[:150]}\" to \"{new_clause_text[:150]}\". "
+            f"'{document_name}' cites section {clause_ref}, which changed: {change_desc}. "
             f'The cited excerpt was: "{document_excerpt[:150]}". Automated passage-level '
             f"comparison requires an API key; manual review of '{document_name}' is recommended."
         )

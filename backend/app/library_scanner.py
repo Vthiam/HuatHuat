@@ -30,6 +30,7 @@ from .config import (
 )
 from .models import Clause, DependencyEdge, Document, DocumentGenre, DocumentSource
 from .services.classifier import CitationMatch, classify_document, detect_citations
+from .services.document_extract import extract_text
 
 
 @dataclass
@@ -72,7 +73,9 @@ def scan_inbox(db: Session) -> InboxScanResult:
         if not path.is_file():
             continue
 
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = extract_text(path)
+        if not text.strip():
+            continue  # unrecognized/unreadable format -- skip rather than misclassify on nothing
         classification = classify_document(text, filename=path.name)
 
         target_dir = STATUTES_DIR if classification.genre == DocumentGenre.STATUTE else TEMPLATES_DIR
@@ -202,7 +205,9 @@ def scan_templates(db: Session, tracked_acts: Optional[list] = None) -> Template
         full_path = LAW_LIBRARY_DIR / doc.file_path
         if not full_path.exists():
             continue
-        text = full_path.read_text(encoding="utf-8", errors="ignore")
+        text = extract_text(full_path)
+        if not text.strip():
+            continue
         other_documents = [d for d in all_templates if d.id != doc.id]
 
         matches = detect_citations(text, tracked_acts, other_documents)
