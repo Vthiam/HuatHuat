@@ -1,0 +1,6 @@
+Client Intake Memo (Firm Template)
+
+Use this memo when a new data-handling client engagement is opened.
+Record the client name, the categories of personal data involved, and
+whether the PDPA Applicability Checklist has been completed. Route to the
+supervising partner for sign-off before any advice is given.

@@ -1,0 +1,8 @@
+New Hire Data Handling Workflow (Firm Template)
+
+Step 1: Identify what personal data will be collected from the new hire.
+Step 2: Before drafting any data-handling clauses in the offer letter,
+        run the Pdpa Applicability Checklist to confirm the Act applies
+        to this engagement.
+Step 3: If the Act applies, proceed to the standard PDPA consent clause
+        library.
