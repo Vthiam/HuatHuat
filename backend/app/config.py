@@ -21,13 +21,21 @@ REPORTS_DIR = LAW_LIBRARY_DIR / "reports"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
 
-# feature/ingestion-citations uses OpenAI rather than Claude for its
-# classify/detect-citations calls (team's hackathon key is OpenAI). Both
-# providers are optional -- with neither key set, everything falls back to
-# free, local, heuristic logic. Keep real-key calls to spot-checks only;
-# this hackathon's OpenAI budget is a hard $15 cap.
+# feature/ingestion-citations and feature/graph-impact use OpenAI's SDK
+# for their classify/detect-citations/recommend calls. Both providers are
+# optional -- with neither key set, everything falls back to free, local,
+# heuristic logic. Keep real-key calls to spot-checks only; this
+# hackathon's LLM budget is a hard $15 cap.
+#
+# OPENAI_BASE_URL lets this point at an OpenAI-compatible gateway instead
+# of api.openai.com -- e.g. OpenRouter (https://openrouter.ai/api/v1),
+# which is what this team's key is actually for (sk-or-v1-... is
+# OpenRouter's key format, not OpenAI's -- using OpenAI's default base URL
+# with an OpenRouter key would just fail auth). Leave unset to use
+# OpenAI directly with a real OpenAI key.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip() or None
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "deepseek/deepseek-chat")  # non-reasoning: predictable token usage, no hidden "thinking" tokens
 
 # Below this, an auto-classified document still gets filed into its
 # best-guess folder, but is reported as needing human confirmation.
