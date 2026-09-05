@@ -43,6 +43,7 @@ def _scan_result_to_out(result) -> schemas.ScanResultOut:
         new_documents=[d.name for d in result.template_result.new_documents],
         edges_created=len(result.template_result.edges_created),
         report_path=str(result.report_path),
+        new_flags=[flag_to_out(f) for f in result.new_flags],
     )
 
 

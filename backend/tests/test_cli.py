@@ -4,7 +4,8 @@ from unittest import mock
 import pytest
 
 from app import cli, library_scanner, report, statute_sync
-from app.services import pdf_highlighter
+from app.services import document_editor, pdf_highlighter
+from app.services import docx_commenter
 from app.models import ChangeEvent, ChangeSource, Flag, FlagStatus
 from app.testing.fixtures import build_sample_library
 
@@ -33,6 +34,9 @@ def fake_library(tmp_path, monkeypatch):
     monkeypatch.setattr(statute_sync, "STATUTES_DIR", statutes)
     monkeypatch.setattr(pdf_highlighter, "LAW_LIBRARY_DIR", law_library)
     monkeypatch.setattr(pdf_highlighter, "REPORTS_DIR", reports)
+    monkeypatch.setattr(document_editor, "LAW_LIBRARY_DIR", law_library)
+    monkeypatch.setattr(docx_commenter, "LAW_LIBRARY_DIR", law_library)
+    monkeypatch.setattr(docx_commenter, "REPORTS_DIR", reports)
     monkeypatch.setattr(report, "REPORTS_DIR", reports)
 
     return {"root": law_library, "inbox": inbox, "statutes": statutes, "templates": templates, "reports": reports}
@@ -159,3 +163,62 @@ def test_review_with_no_pending_flags_does_not_crash(db_session, fake_library, c
     cli.cmd_review(db_session, status="pending")
     captured = capsys.readouterr()
     assert "No flags" in captured.out
+
+
+def test_scan_auto_loop_flags_new_document_against_existing_change(db_session, fake_library, monkeypatch):
+    """The auto-loop: a statute clause already changed (ChangeEvent exists)
+    BEFORE this document ever existed. Dropping the document in and
+    scanning should immediately flag it -- not wait for the next
+    check-sso, which wouldn't detect anything new for a clause that
+    hasn't changed again."""
+    lib = build_sample_library(db_session)
+    db_session.commit()
+    event = ChangeEvent(
+        clause_id=lib["clause"].id, old_text="old", new_text="new", source=ChangeSource.SIMULATED
+    )
+    db_session.add(event)
+    db_session.commit()
+
+    # scan_templates' citation detection uses config.TRACKED_ACTS by
+    # default (real PDPA) -- override it to recognize the fixture's
+    # synthetic "Sample Act 2024" so the new document's citation is found.
+    monkeypatch.setattr(
+        library_scanner,
+        "TRACKED_ACTS",
+        [{"act_id": "SAMPLEACT2024", "name": "Sample Act 2024", "clause_refs": ["4"]}],
+    )
+
+    (fake_library["templates"] / "new_checklist.txt").write_text(
+        "These exemptions are set out in section 4 of the Sample Act 2024."
+    )
+    notify_calls = []
+    monkeypatch.setattr(cli.notifier, "notify", lambda title, message: notify_calls.append((title, message)))
+
+    result = cli.cmd_scan(db_session)
+
+    assert len(result.template_result.new_documents) == 1
+    new_doc_names = {f.document.name for f in result.new_flags}
+    assert "New Checklist" in new_doc_names
+    # the fixture's own pre-existing documents (never checked before this
+    # scan) get swept up too -- that's the auto-loop working correctly,
+    # not a bug: nobody had run impact analysis against this ChangeEvent
+    # until now.
+    assert len(result.new_flags) == 3
+
+    assert len(notify_calls) == 1
+    assert "flagged for review" in notify_calls[0][1]
+
+
+def test_scan_auto_loop_notifies_informationally_when_no_flag_applies(db_session, fake_library, monkeypatch):
+    """A brand new document with no pre-existing change to match against
+    still gets a lighter, informational notification -- "this is now
+    being watched" -- rather than silence."""
+    (fake_library["templates"] / "standalone.txt").write_text("A document that cites nothing tracked.")
+    notify_calls = []
+    monkeypatch.setattr(cli.notifier, "notify", lambda title, message: notify_calls.append((title, message)))
+
+    result = cli.cmd_scan(db_session)
+
+    assert result.new_flags == []
+    assert len(notify_calls) == 1
+    assert "being watched" in notify_calls[0][1]

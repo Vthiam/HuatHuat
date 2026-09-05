@@ -116,6 +116,7 @@ class ScanResultOut(BaseModel):
     new_documents: List[str]
     edges_created: int
     report_path: str
+    new_flags: List[FlagOut] = []  # flags raised immediately against pre-existing law changes
 
 
 class CheckSsoRequest(BaseModel):

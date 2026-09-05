@@ -21,7 +21,6 @@ from .config import TRACKED_ACTS
 from .db import Base, SessionLocal, engine
 from .library_scanner import InboxScanResult, TemplateScanResult
 from .models import ChangeEvent, DependencyEdge, Flag, FlagStatus
-from .services import document_editor
 from .services.docx_commenter import add_comment_to_docx
 from .services.pdf_highlighter import highlight_flag_in_pdf
 from .services.sso_client import should_run_now
@@ -32,11 +31,26 @@ class ScanCommandResult:
     inbox_result: InboxScanResult
     template_result: TemplateScanResult
     report_path: Path
+    new_flags: List[Flag] = field(default_factory=list)
 
 
 def cmd_scan(db) -> ScanCommandResult:
+    """The auto-loop: ingesting a document doesn't stop at classifying it
+    and recording what it depends on. If any of its new dependencies point
+    at a clause that already changed before this document existed, it
+    needs checking right now -- not on the next check-sso run, which won't
+    detect anything new for a clause that hasn't changed again. So every
+    scan re-runs impact analysis against every past ChangeEvent;
+    process_change_event is idempotent (skips a document that already has
+    a flag for that event), so this is safe and cheap to do every time."""
     inbox_result = library_scanner.scan_inbox(db)
     template_result = library_scanner.scan_templates(db)
+
+    new_flags: List[Flag] = []
+    if template_result.new_documents or inbox_result.classified:
+        for event in db.query(ChangeEvent).all():
+            new_flags.extend(impact_service.process_change_event(db, event))
+
     report_path = report.write_scan_report(inbox_result, template_result)
 
     print(f"Classified {len(inbox_result.classified)} document(s) from inbox/")
@@ -46,9 +60,23 @@ def cmd_scan(db) -> ScanCommandResult:
 
     print(f"Registered {len(template_result.new_documents)} new template(s)")
     print(f"Detected {len(template_result.edges_created)} new dependency edge(s)")
+    if new_flags:
+        print(f"Immediately flagged {len(new_flags)} document(s) against existing law changes")
     print(f"Report written to {report_path}")
 
-    return ScanCommandResult(inbox_result, template_result, report_path)
+    total_new_docs = len(template_result.new_documents) + len(inbox_result.classified)
+    if new_flags:
+        notifier.notify(
+            title="Document needs review",
+            message=f"{len(new_flags)} newly-added document(s) flagged for review against existing law changes.",
+        )
+    elif total_new_docs:
+        notifier.notify(
+            title="Document added to library",
+            message=f"{total_new_docs} new document(s) added and now being watched for regulatory changes.",
+        )
+
+    return ScanCommandResult(inbox_result, template_result, report_path, new_flags)
 
 
 def _excerpt_for_flag(db, flag: Flag) -> str:

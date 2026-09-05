@@ -1,9 +1,11 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from . import scheduler
 from .config import INBOX_DIR, LAW_LIBRARY_DIR, REPORTS_DIR, STATUTES_DIR, TEMPLATES_DIR
 from .db import Base, engine
 from .routers import actions, changes, flags, graph, library
@@ -14,7 +16,15 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     for d in (INBOX_DIR, STATUTES_DIR, TEMPLATES_DIR, REPORTS_DIR):
         d.mkdir(parents=True, exist_ok=True)
-    yield
+
+    # Self-contained: the app checks for statute updates on its own
+    # schedule (see scheduler.py) rather than needing an external cron,
+    # so this works the same locally or deployed.
+    scheduler_task = asyncio.create_task(scheduler.run_scheduler_loop())
+    try:
+        yield
+    finally:
+        scheduler_task.cancel()
 
 
 app = FastAPI(title="HuatHuat", lifespan=lifespan)
