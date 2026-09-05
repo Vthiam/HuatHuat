@@ -55,10 +55,33 @@ def _session() -> requests.Session:
     return s
 
 
+class SSOFetchError(Exception):
+    """Raised when SSO returns a response that isn't a real page load --
+    e.g. an HTTP 202 with an empty body, observed in practice during this
+    project after enough rapid requests to trip rate-limiting/bot
+    detection. `resp.raise_for_status()` alone does NOT catch this: a 202
+    is not an error status, so without this check an empty/incomplete
+    response would silently look identical to "fetched successfully, and
+    nothing has changed" -- exactly the failure mode this tool exists to
+    prevent elsewhere. Callers should back off and retry later, not retry
+    immediately (see SSO_SCRAPE_WINDOW_* in config.py)."""
+
+
+def _validate_html(html: str, url: str) -> None:
+    if len(html) < 1000 or "legisContent" not in html:
+        raise SSOFetchError(
+            f"SSO returned an incomplete response for {url} ({len(html)} bytes). This usually "
+            "means the request was rate-limited or blocked rather than a genuine page load -- "
+            "back off and retry later rather than immediately retrying."
+        )
+
+
 def fetch_act_html(act_id: str) -> str:
     """Fetch the current version of an Act's first Part."""
-    resp = _session().get(f"{SSO_BASE_URL}/Act/{act_id}", timeout=20)
+    url = f"{SSO_BASE_URL}/Act/{act_id}"
+    resp = _session().get(url, timeout=20)
     resp.raise_for_status()
+    _validate_html(resp.text, url)
     return resp.text
 
 
@@ -69,6 +92,7 @@ def fetch_historical_act_html(act_id: str, valid_date: str, doc_date: str) -> st
     url = f"{SSO_BASE_URL}/Act/{act_id}/Historical/{valid_date}"
     resp = _session().get(url, params={"DocDate": doc_date, "ValidDate": valid_date}, timeout=20)
     resp.raise_for_status()
+    _validate_html(resp.text, url)
     return resp.text
 
 
