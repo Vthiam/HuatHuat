@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+requests
+beautifulsoup4
+python-dotenv
+anthropic
+pytest
+httpx
