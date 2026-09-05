@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.sso_client import parse_clauses, should_run_now
+from app.services.sso_client import SSOFetchError, _validate_html, parse_clauses, should_run_now
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -50,6 +50,19 @@ def test_should_run_now_respects_sgt_window():
 
     assert should_run_now(inside_window) is True
     assert should_run_now(outside_window) is False
+
+
+def test_validate_html_rejects_empty_rate_limited_response():
+    """Reproduces the real HTTP 202 + empty body observed from SSO during
+    this project after heavy request volume -- must raise, not silently
+    look like "fetched fine, nothing changed"."""
+    with pytest.raises(SSOFetchError):
+        _validate_html("", "https://sso.agc.gov.sg/Act/PDPA2012")
+
+
+def test_validate_html_accepts_real_fixture():
+    html = _load_fixture("pdpa_current.html")
+    _validate_html(html, "https://sso.agc.gov.sg/Act/PDPA2012")  # should not raise
 
 
 @pytest.mark.network
