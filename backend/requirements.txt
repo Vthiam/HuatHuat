@@ -11,3 +11,4 @@ pymupdf
 python-multipart
 pytest
 httpx
+tzdata
