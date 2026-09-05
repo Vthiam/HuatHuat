@@ -54,6 +54,7 @@ class ChangeSource(str, enum.Enum):
 
 class ReasoningSource(str, enum.Enum):
     CLAUDE = "claude"
+    OPENAI = "openai"
     HEURISTIC = "heuristic"
 
 

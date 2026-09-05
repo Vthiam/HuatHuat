@@ -21,6 +21,18 @@ REPORTS_DIR = LAW_LIBRARY_DIR / "reports"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
 
+# feature/ingestion-citations uses OpenAI rather than Claude for its
+# classify/detect-citations calls (team's hackathon key is OpenAI). Both
+# providers are optional -- with neither key set, everything falls back to
+# free, local, heuristic logic. Keep real-key calls to spot-checks only;
+# this hackathon's OpenAI budget is a hard $15 cap.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# Below this, an auto-classified document still gets filed into its
+# best-guess folder, but is reported as needing human confirmation.
+CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.6
+
 # SSO Terms of Use clause 13(d): automated extraction only 3am-7am Singapore time.
 SSO_SCRAPE_WINDOW_START_HOUR_SGT = 3
 SSO_SCRAPE_WINDOW_END_HOUR_SGT = 7

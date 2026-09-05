@@ -5,5 +5,6 @@ requests
 beautifulsoup4
 python-dotenv
 anthropic
+openai
 pytest
 httpx
