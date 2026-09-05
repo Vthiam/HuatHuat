@@ -6,5 +6,7 @@ beautifulsoup4
 python-dotenv
 anthropic
 openai
+python-docx
+pymupdf
 pytest
 httpx

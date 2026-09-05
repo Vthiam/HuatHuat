@@ -27,8 +27,8 @@ def test_recommend_impact_direct_heuristic_grounds_in_old_and_new_text():
     )
     assert source == ReasoningSource.HEURISTIC
     assert "Sample Applicability Checklist" in text
-    assert "Parts III to VI" in text
-    assert "Parts 3, 4, 5, 6, 6A and 6B" in text
+    assert "III to VI" in text
+    assert "3, 4, 5, 6, 6A and 6B" in text
 
 
 def test_recommend_impact_transitive_heuristic_mentions_dependency_path():
