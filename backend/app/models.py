@@ -17,6 +17,7 @@ import datetime
 import enum
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Enum as SAEnum,
@@ -184,9 +185,15 @@ class Flag(Base):
     """A document that may need a lawyer's attention because of a
     ChangeEvent -- either it directly cites the changed clause, or it
     depends on another document that was itself flagged (transitive).
-    recommendation_text is always a suggestion: accepting a flag only
-    records a review decision in `status`, it never rewrites the
-    document's own content.
+
+    Revised design (explicit product decision, overriding the original
+    "never auto-edit downstream documents" rule): Accepting a flag DOES
+    apply suggested_replacement in place of original_sentence in the real
+    document -- but only for .docx/.txt (see document_editor.py); PDFs
+    keep the original highlight-only, human-edits-it-themselves behavior.
+    Rejecting a flag applies no AI-suggested text, but the human can
+    self-edit instead (human_edit_text), which still counts as
+    document_edited if applied.
     """
 
     __tablename__ = "flags"
@@ -199,6 +206,19 @@ class Flag(Base):
     via_document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)  # set for transitive flags
     recommendation_text = Column(Text, nullable=True)
     recommendation_source = Column(SAEnum(ReasoningSource), nullable=True)
+    # original_sentence/suggested_replacement are the AI's proposed edit --
+    # always a suggestion, never applied by anything that creates a Flag.
+    # Only accepting the flag (see cli.py/routers/flags.py) applies
+    # suggested_replacement in place of original_sentence, and only for
+    # .docx/.txt documents (see document_editor.py) -- PDFs keep the
+    # highlight-only behavior since reliable in-place PDF text replacement
+    # isn't feasible. Both null when the model found nothing to change, or
+    # the heuristic fallback produced this flag (it can't verify a quote
+    # against real document text, so it never proposes one).
+    original_sentence = Column(Text, nullable=True)
+    suggested_replacement = Column(Text, nullable=True)
+    document_edited = Column(Boolean, nullable=False, default=False)  # true once an edit actually changed the file
+    human_edit_text = Column(Text, nullable=True)  # set when a human wrote their own replacement instead of the AI's
     status = Column(SAEnum(FlagStatus), nullable=False, default=FlagStatus.PENDING)
     created_at = Column(DateTime, default=utcnow)
     resolved_at = Column(DateTime, nullable=True)

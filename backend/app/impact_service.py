@@ -8,18 +8,24 @@ and who it affects.
      and transitive
   3. Draft a per-document recommendation and write a Flag row
 
-Never touches statute text, never edits a document's own content, never
-fires a notification -- those are feature/sso-diff-history's and
-feature/cli-reports-review's jobs respectively. This module's only output
-is Flag rows (plus filling in the one ChangeEvent field left for it).
+Also owns resolving a Flag once a human reviews it (resolve_flag_accept /
+resolve_flag_reject) -- both cli.py's `review` command and the API's
+routers/flags.py call these same two functions, so accept/reject behavior
+(including the real document edit on accept) lives in exactly one place.
+
+Never touches statute text directly (that's feature/sso-diff-history's
+job) and never fires a notification (that's feature/cli-reports-review's
+job) -- but, per explicit product decision, resolve_flag_accept DOES
+rewrite a document's own content for .docx/.txt, via document_editor.py.
 """
-from typing import List
+import datetime
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
 from .config import LAW_LIBRARY_DIR
-from .models import ChangeEvent, DependencyEdge, Document, Flag
-from .services import llm
+from .models import ChangeEvent, DependencyEdge, Document, Flag, FlagStatus
+from .services import document_editor, llm
 from .services.graph_service import AffectedDocument, find_affected_documents
 
 
@@ -89,7 +95,7 @@ def process_change_event(db: Session, change_event: ChangeEvent) -> List[Flag]:
 
         excerpt = _excerpt_for(db, item, clause.id)
         document_text = _read_document_text(item.document)
-        rec_text, rec_source = llm.recommend_impact(
+        rec = llm.recommend_impact(
             document_name=item.document.name,
             document_text=document_text,
             document_excerpt=excerpt,
@@ -99,14 +105,28 @@ def process_change_event(db: Session, change_event: ChangeEvent) -> List[Flag]:
             dependency_path=item.dependency_path,
         )
 
+        # Only trust conflicting_sentence if it's a verbatim match in the
+        # real document text -- an LLM can occasionally paraphrase instead
+        # of quoting exactly, and document_editor.py needs an exact match
+        # to safely apply an edit later. A near-miss is surfaced as a flag
+        # with the explanation but no auto-editable suggestion, rather
+        # than silently failing to find it at accept time.
+        verified_sentence = None
+        verified_replacement = None
+        if rec.conflicting_sentence and rec.conflicting_sentence in document_text:
+            verified_sentence = rec.conflicting_sentence
+            verified_replacement = rec.suggested_replacement
+
         flag = Flag(
             change_event_id=change_event.id,
             document_id=item.document.id,
             flag_type=item.flag_type,
             depth=item.depth,
             via_document_id=item.via_document.id if item.via_document else None,
-            recommendation_text=rec_text,
-            recommendation_source=rec_source,
+            recommendation_text=rec.explanation,
+            recommendation_source=rec.source,
+            original_sentence=verified_sentence,
+            suggested_replacement=verified_replacement,
         )
         db.add(flag)
         db.flush()
@@ -121,3 +141,47 @@ def process_all(db: Session, change_events: List[ChangeEvent]) -> List[Flag]:
     for event in change_events:
         all_flags.extend(process_change_event(db, event))
     return all_flags
+
+
+def resolve_flag_accept(db: Session, flag: Flag) -> Flag:
+    """Accepts the AI's suggestion. For .docx/.txt with a verified
+    original_sentence + suggested_replacement, this actually rewrites the
+    document (document_editor.py) -- explicit product decision, and the
+    one deliberate exception to "never auto-edit a document's content" in
+    this project. PDFs, and any flag without both fields (heuristic
+    fallback, or the model found nothing to change), are accepted as a
+    review decision only -- nothing to apply.
+
+    Safe to call on an already-resolved flag: it will just re-attempt the
+    edit (harmless no-op if the sentence is no longer present, e.g. it was
+    already applied) rather than erroring.
+    """
+    flag.status = FlagStatus.ACCEPTED
+    flag.resolved_at = datetime.datetime.utcnow()
+
+    if flag.original_sentence and flag.suggested_replacement:
+        applied = document_editor.apply_edit(flag.document, flag.original_sentence, flag.suggested_replacement)
+        flag.document_edited = flag.document_edited or applied
+
+    db.commit()
+    return flag
+
+
+def resolve_flag_reject(db: Session, flag: Flag, human_edit_text: Optional[str] = None) -> Flag:
+    """Rejects the AI's specific suggested wording. If the human supplies
+    their own replacement text (self-edit), it's applied in place of
+    original_sentence the same way an accepted edit would be -- this is
+    "reject the AI's answer, but still make the correction, in my own
+    words" rather than "do nothing". Requires original_sentence to exist
+    (something concrete to replace); with no self-edit text supplied, this
+    is just a plain rejection with no document change."""
+    flag.status = FlagStatus.REJECTED
+    flag.resolved_at = datetime.datetime.utcnow()
+
+    if human_edit_text and flag.original_sentence:
+        flag.human_edit_text = human_edit_text
+        applied = document_editor.apply_edit(flag.document, flag.original_sentence, human_edit_text)
+        flag.document_edited = flag.document_edited or applied
+
+    db.commit()
+    return flag
