@@ -8,5 +8,6 @@ anthropic
 openai
 python-docx
 pymupdf
+python-multipart
 pytest
 httpx

@@ -48,7 +48,7 @@ def test_check_sso_live_refuses_outside_window_without_override(db_session, fake
 
     result = cli.cmd_check_sso(db_session, live=True, simulate=False, clause_ref=None, override_schedule=False)
 
-    assert result == 1
+    assert result.ok is False
 
 
 def test_check_sso_live_proceeds_with_override_schedule(db_session, fake_library, monkeypatch):
@@ -63,18 +63,18 @@ def test_check_sso_live_proceeds_with_override_schedule(db_session, fake_library
 
     result = cli.cmd_check_sso(db_session, live=True, simulate=False, clause_ref=None, override_schedule=True)
 
-    assert result == 0
+    assert result.ok is True
     assert called["n"] == 1
 
 
 def test_check_sso_simulate_requires_clause_ref(db_session, fake_library):
     result = cli.cmd_check_sso(db_session, live=False, simulate=True, clause_ref=None, override_schedule=False)
-    assert result == 1
+    assert result.ok is False
 
 
 def test_check_sso_rejects_both_live_and_simulate(db_session, fake_library):
     result = cli.cmd_check_sso(db_session, live=True, simulate=True, clause_ref="4", override_schedule=False)
-    assert result == 1
+    assert result.ok is False
 
 
 def test_check_sso_creates_flags_and_highlights_pdf(db_session, fake_library, monkeypatch):
@@ -111,7 +111,7 @@ def test_check_sso_creates_flags_and_highlights_pdf(db_session, fake_library, mo
 
     result = cli.cmd_check_sso(db_session, live=True, simulate=False, clause_ref=None, override_schedule=True)
 
-    assert result == 0
+    assert result.ok is True
     flags = db_session.query(Flag).all()
     assert len(flags) == 2  # template_a direct + template_b transitive
 
@@ -129,7 +129,7 @@ def test_check_sso_no_events_does_not_notify(db_session, fake_library, monkeypat
 
     result = cli.cmd_check_sso(db_session, live=True, simulate=False, clause_ref=None, override_schedule=True)
 
-    assert result == 0
+    assert result.ok is True
     assert notify_calls == []
 
 

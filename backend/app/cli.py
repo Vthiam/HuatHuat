@@ -6,26 +6,37 @@
     python -m app.cli review [--status pending]
 
 Each subcommand is backed by a plain function (cmd_scan, cmd_check_sso,
-cmd_review) so tests call them directly instead of shelling out to a
-subprocess.
+cmd_review) that returns a structured result rather than only printing --
+feature/api-ui's routers call these exact same functions, so the API and
+the CLI share one orchestration path instead of duplicating it.
 """
 import argparse
 import datetime
 import sys
-from typing import Iterator, List, Optional
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, Iterator, List, Optional
 
 from . import impact_service, library_scanner, notifier, report, statute_sync
 from .config import TRACKED_ACTS
 from .db import Base, SessionLocal, engine
-from .models import DependencyEdge, Flag, FlagStatus
+from .library_scanner import InboxScanResult, TemplateScanResult
+from .models import ChangeEvent, DependencyEdge, Flag, FlagStatus
 from .services.pdf_highlighter import highlight_flag_in_pdf
 from .services.sso_client import should_run_now
 
 
-def cmd_scan(db) -> None:
+@dataclass
+class ScanCommandResult:
+    inbox_result: InboxScanResult
+    template_result: TemplateScanResult
+    report_path: Path
+
+
+def cmd_scan(db) -> ScanCommandResult:
     inbox_result = library_scanner.scan_inbox(db)
     template_result = library_scanner.scan_templates(db)
-    path = report.write_scan_report(inbox_result, template_result)
+    report_path = report.write_scan_report(inbox_result, template_result)
 
     print(f"Classified {len(inbox_result.classified)} document(s) from inbox/")
     for c in inbox_result.classified:
@@ -34,7 +45,9 @@ def cmd_scan(db) -> None:
 
     print(f"Registered {len(template_result.new_documents)} new template(s)")
     print(f"Detected {len(template_result.edges_created)} new dependency edge(s)")
-    print(f"Report written to {path}")
+    print(f"Report written to {report_path}")
+
+    return ScanCommandResult(inbox_result, template_result, report_path)
 
 
 def _excerpt_for_flag(db, flag: Flag) -> str:
@@ -53,24 +66,37 @@ def _excerpt_for_flag(db, flag: Flag) -> str:
     return edge.excerpt if edge is not None else ""
 
 
+@dataclass
+class CheckSsoCommandResult:
+    ok: bool
+    message: Optional[str] = None  # set when ok=False, explains the refusal
+    change_events: List[ChangeEvent] = field(default_factory=list)
+    flags: List[Flag] = field(default_factory=list)
+    highlighted_pdfs: Dict[int, Path] = field(default_factory=dict)
+    report_path: Optional[Path] = None
+
+
 def cmd_check_sso(
     db, live: bool, simulate: bool, clause_ref: Optional[str], override_schedule: bool
-) -> int:
+) -> CheckSsoCommandResult:
     if live == simulate:
-        print("Specify exactly one of --live or --simulate")
-        return 1
+        message = "Specify exactly one of --live or --simulate"
+        print(message)
+        return CheckSsoCommandResult(ok=False, message=message)
 
     if live and not override_schedule and not should_run_now():
-        print(
+        message = (
             "Refusing to run a live SSO check outside the permitted automated-extraction "
             "window (3am-7am Singapore time, per SSO Terms of Use clause 13(d)). "
             "Pass --override-schedule to run anyway as a deliberate manual/demo override."
         )
-        return 1
+        print(message)
+        return CheckSsoCommandResult(ok=False, message=message)
 
     if simulate and not clause_ref:
-        print("--simulate requires --clause-ref")
-        return 1
+        message = "--simulate requires --clause-ref"
+        print(message)
+        return CheckSsoCommandResult(ok=False, message=message)
 
     all_events = []
     for act_config in TRACKED_ACTS:
@@ -82,7 +108,7 @@ def cmd_check_sso(
 
     flags = impact_service.process_all(db, all_events)
 
-    highlighted_pdfs = {}
+    highlighted_pdfs: Dict[int, Path] = {}
     for flag in flags:
         excerpt = _excerpt_for_flag(db, flag)
         output_path = highlight_flag_in_pdf(flag.document, flag, excerpt)
@@ -108,7 +134,13 @@ def cmd_check_sso(
             message="No dependent documents found in the library.",
         )
 
-    return 0
+    return CheckSsoCommandResult(
+        ok=True,
+        change_events=all_events,
+        flags=flags,
+        highlighted_pdfs=highlighted_pdfs,
+        report_path=report_path,
+    )
 
 
 def cmd_review(db, status: str = "pending", auto_answers: Optional[List[str]] = None) -> None:
@@ -173,7 +205,8 @@ def main(argv=None) -> int:
             cmd_scan(db)
             return 0
         if args.command == "check-sso":
-            return cmd_check_sso(db, args.live, args.simulate, args.clause_ref, args.override_schedule)
+            result = cmd_check_sso(db, args.live, args.simulate, args.clause_ref, args.override_schedule)
+            return 0 if result.ok else 1
         if args.command == "review":
             cmd_review(db, status=args.status)
             return 0
