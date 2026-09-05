@@ -11,7 +11,6 @@ feature/api-ui's routers call these exact same functions, so the API and
 the CLI share one orchestration path instead of duplicating it.
 """
 import argparse
-import datetime
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +21,7 @@ from .config import TRACKED_ACTS
 from .db import Base, SessionLocal, engine
 from .library_scanner import InboxScanResult, TemplateScanResult
 from .models import ChangeEvent, DependencyEdge, Flag, FlagStatus
+from .services.docx_commenter import add_comment_to_docx
 from .services.pdf_highlighter import highlight_flag_in_pdf
 from .services.sso_client import should_run_now
 
@@ -31,11 +31,26 @@ class ScanCommandResult:
     inbox_result: InboxScanResult
     template_result: TemplateScanResult
     report_path: Path
+    new_flags: List[Flag] = field(default_factory=list)
 
 
 def cmd_scan(db) -> ScanCommandResult:
+    """The auto-loop: ingesting a document doesn't stop at classifying it
+    and recording what it depends on. If any of its new dependencies point
+    at a clause that already changed before this document existed, it
+    needs checking right now -- not on the next check-sso run, which won't
+    detect anything new for a clause that hasn't changed again. So every
+    scan re-runs impact analysis against every past ChangeEvent;
+    process_change_event is idempotent (skips a document that already has
+    a flag for that event), so this is safe and cheap to do every time."""
     inbox_result = library_scanner.scan_inbox(db)
     template_result = library_scanner.scan_templates(db)
+
+    new_flags: List[Flag] = []
+    if template_result.new_documents or inbox_result.classified:
+        for event in db.query(ChangeEvent).all():
+            new_flags.extend(impact_service.process_change_event(db, event))
+
     report_path = report.write_scan_report(inbox_result, template_result)
 
     print(f"Classified {len(inbox_result.classified)} document(s) from inbox/")
@@ -45,9 +60,23 @@ def cmd_scan(db) -> ScanCommandResult:
 
     print(f"Registered {len(template_result.new_documents)} new template(s)")
     print(f"Detected {len(template_result.edges_created)} new dependency edge(s)")
+    if new_flags:
+        print(f"Immediately flagged {len(new_flags)} document(s) against existing law changes")
     print(f"Report written to {report_path}")
 
-    return ScanCommandResult(inbox_result, template_result, report_path)
+    total_new_docs = len(template_result.new_documents) + len(inbox_result.classified)
+    if new_flags:
+        notifier.notify(
+            title="Document needs review",
+            message=f"{len(new_flags)} newly-added document(s) flagged for review against existing law changes.",
+        )
+    elif total_new_docs:
+        notifier.notify(
+            title="Document added to library",
+            message=f"{total_new_docs} new document(s) added and now being watched for regulatory changes.",
+        )
+
+    return ScanCommandResult(inbox_result, template_result, report_path, new_flags)
 
 
 def _excerpt_for_flag(db, flag: Flag) -> str:
@@ -73,6 +102,7 @@ class CheckSsoCommandResult:
     change_events: List[ChangeEvent] = field(default_factory=list)
     flags: List[Flag] = field(default_factory=list)
     highlighted_pdfs: Dict[int, Path] = field(default_factory=dict)
+    commented_docs: Dict[int, Path] = field(default_factory=dict)
     report_path: Optional[Path] = None
 
 
@@ -109,11 +139,22 @@ def cmd_check_sso(
     flags = impact_service.process_all(db, all_events)
 
     highlighted_pdfs: Dict[int, Path] = {}
+    commented_docs: Dict[int, Path] = {}
     for flag in flags:
-        excerpt = _excerpt_for_flag(db, flag)
-        output_path = highlight_flag_in_pdf(flag.document, flag, excerpt)
-        if output_path is not None:
-            highlighted_pdfs[flag.id] = output_path
+        # Prefer the AI's verified conflicting_sentence (the specific
+        # sentence it identified inside this document) over the generic
+        # dependency-edge excerpt when available -- it's a more precise
+        # target for both the highlight and the comment anchor.
+        target_text = flag.original_sentence or _excerpt_for_flag(db, flag)
+
+        pdf_path = highlight_flag_in_pdf(flag.document, flag, target_text)
+        if pdf_path is not None:
+            highlighted_pdfs[flag.id] = pdf_path
+
+        if flag.original_sentence:
+            docx_path = add_comment_to_docx(flag.document, flag, flag.original_sentence)
+            if docx_path is not None:
+                commented_docs[flag.id] = docx_path
 
     report_path = report.write_check_report(all_events, flags, highlighted_pdfs)
 
@@ -121,6 +162,8 @@ def cmd_check_sso(
     print(f"Raised {len(flags)} flag(s)")
     for pdf_path in highlighted_pdfs.values():
         print(f"  Highlighted PDF: {pdf_path}")
+    for docx_path in commented_docs.values():
+        print(f"  Commented DOCX: {docx_path}")
     print(f"Report written to {report_path}")
 
     if flags:
@@ -139,6 +182,7 @@ def cmd_check_sso(
         change_events=all_events,
         flags=flags,
         highlighted_pdfs=highlighted_pdfs,
+        commented_docs=commented_docs,
         report_path=report_path,
     )
 
@@ -146,7 +190,9 @@ def cmd_check_sso(
 def cmd_review(db, status: str = "pending", auto_answers: Optional[List[str]] = None) -> None:
     """auto_answers lets tests (and any future scripted use) drive this
     without real stdin: a list of 'a'/'r'/'s' consumed in order instead of
-    calling input()."""
+    calling input(). A reject can carry a self-edit as 'r:my replacement
+    text' (used both by the scripted form and parsed the same way here);
+    interactively, rejecting prompts for optional self-edit text instead."""
     flags = db.query(Flag).filter_by(status=FlagStatus(status)).order_by(Flag.created_at).all()
     if not flags:
         print(f"No flags with status={status}.")
@@ -157,22 +203,36 @@ def cmd_review(db, status: str = "pending", auto_answers: Optional[List[str]] = 
     for flag in flags:
         print(f"\n[{flag.id}] {flag.document.name} ({flag.flag_type.value})")
         print(f"  {flag.recommendation_text}")
+        if flag.original_sentence:
+            print(f'  Flagged sentence: "{flag.original_sentence}"')
+        if flag.suggested_replacement:
+            print(f'  AI suggests: "{flag.suggested_replacement}"')
 
         if answers is not None:
             answer = next(answers, "s")
         else:
-            answer = input("  [a]ccept / [r]eject / [s]kip: ").strip().lower()
+            answer = input("  [a]ccept / [r]eject / [s]kip: ").strip()
 
-        if answer == "a":
-            flag.status = FlagStatus.ACCEPTED
-        elif answer == "r":
-            flag.status = FlagStatus.REJECTED
+        answer_lower = answer.lower()
+        if answer_lower == "a":
+            impact_service.resolve_flag_accept(db, flag)
+            note = " (document edited)" if flag.document_edited else ""
+            print(f"  -> accepted{note}")
+        elif answer_lower.startswith("r"):
+            human_text = None
+            if ":" in answer:
+                human_text = answer.split(":", 1)[1]
+            elif answers is None and flag.original_sentence:
+                typed = input(
+                    f'  Reject noted. Type your own replacement for "{flag.original_sentence[:60]}..." '
+                    "(or press Enter to skip editing): "
+                ).strip()
+                human_text = typed or None
+            impact_service.resolve_flag_reject(db, flag, human_edit_text=human_text)
+            note = " (your edit applied)" if flag.document_edited else ""
+            print(f"  -> rejected{note}")
         else:
             continue
-
-        flag.resolved_at = datetime.datetime.utcnow()
-        db.commit()
-        print(f"  -> {flag.status.value}")
 
 
 def build_parser() -> argparse.ArgumentParser:

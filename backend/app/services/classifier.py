@@ -19,14 +19,28 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-from ..config import OPENAI_API_KEY, OPENAI_MODEL
+from ..config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
 from ..models import DocumentGenre, ReasoningSource
 
 _client = None
 if OPENAI_API_KEY:
     import openai
 
-    _client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    _client = openai.OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, timeout=20.0, max_retries=1)
+
+_IS_OPENROUTER = bool(OPENAI_BASE_URL) and "openrouter" in OPENAI_BASE_URL
+
+
+def _reasoning_kwargs() -> dict:
+    """Some OpenRouter models do chain-of-thought before answering, spending
+    tokens on invisible reasoning separate from the final content. Without
+    this, a short max_tokens can be entirely consumed by reasoning and
+    return empty content -- a failed call that still burns tokens for zero
+    output. "low" effort is the cheapest setting that reliably leaves room
+    to answer. No-op when talking to OpenAI directly."""
+    if _IS_OPENROUTER:
+        return {"extra_body": {"reasoning": {"effort": "low"}}}
+    return {}
 
 
 @dataclass
@@ -76,7 +90,8 @@ def _call_openai_classify(text: str, filename: str) -> Optional[ClassificationRe
     try:
         resp = _client.chat.completions.create(
             model=OPENAI_MODEL,
-            max_tokens=50,
+            max_tokens=500,
+            **_reasoning_kwargs(),
             messages=[
                 {
                     "role": "system",
@@ -176,7 +191,8 @@ def _call_openai_detect_citations(text: str, tracked_acts: list, other_documents
         docs_desc = "\n".join(f"- id={d.id}: {d.name}" for d in other_documents) or "(none)"
         resp = _client.chat.completions.create(
             model=OPENAI_MODEL,
-            max_tokens=300,
+            max_tokens=700,
+            **_reasoning_kwargs(),
             messages=[
                 {
                     "role": "system",

@@ -17,9 +17,11 @@ Every recommendation is phrased as a suggestion for a human to evaluate,
 never a directive or a conclusion -- and this module never writes to a
 document's own content. It only ever returns text for a caller to store.
 """
+import json
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from ..config import OPENAI_API_KEY, OPENAI_MODEL
+from ..config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
 from ..models import ReasoningSource
 from .diff_engine import word_diff
 
@@ -27,13 +29,26 @@ _client = None
 if OPENAI_API_KEY:
     import openai
 
-    _client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    _client = openai.OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL, timeout=20.0, max_retries=1)
+
+_IS_OPENROUTER = bool(OPENAI_BASE_URL) and "openrouter" in OPENAI_BASE_URL
 
 
-def _call_openai(system: str, user: str, max_tokens: int = 300) -> Optional[str]:
+def _call_openai(system: str, user: str, max_tokens: int = 300, json_mode: bool = False) -> Optional[str]:
     if _client is None:
         return None
     try:
+        kwargs = {}
+        if _IS_OPENROUTER:
+            # This model does chain-of-thought before answering (visible as
+            # `reasoning_tokens` in the response, separate from the final
+            # `content`). Without this, it can spend the entire max_tokens
+            # budget thinking and return empty content -- a failed call that
+            # still burns tokens for zero output. "low" effort is the
+            # cheapest setting that still reliably leaves room to answer.
+            kwargs["extra_body"] = {"reasoning": {"effort": "low"}}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
         resp = _client.chat.completions.create(
             model=OPENAI_MODEL,
             max_tokens=max_tokens,
@@ -41,6 +56,7 @@ def _call_openai(system: str, user: str, max_tokens: int = 300) -> Optional[str]
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            **kwargs,
         )
         content = resp.choices[0].message.content
         return content.strip() if content else None
@@ -53,17 +69,13 @@ def _call_openai(system: str, user: str, max_tokens: int = 300) -> Optional[str]
 def summarize_change(clause_ref: str, heading: str, old_text: str, new_text: str) -> Tuple[str, ReasoningSource]:
     result = _call_openai(
         system=(
-            "You are a legal-tech assistant summarising a change to a Singapore statute for a "
-            "law firm. Carefully compare the OLD and NEW text word by word before answering -- "
-            "do not rely on general knowledge of this or any other statute, and do not assume "
-            "or invent any provision, section, or legal context that is not literally shown in "
-            "the text below. Base your answer only on the exact wording given. In 2-3 "
-            "plain-English sentences, explain precisely what changed and why it might matter in "
-            "practice. Do not give legal advice or state a definitive legal conclusion -- "
-            "describe the change and its possible practical significance only."
+            "Legal-tech assistant. Compare OLD vs NEW statute text below word by word. "
+            "Base your answer only on the exact wording given -- do not use outside legal "
+            "knowledge or invent context. In 2-3 plain-English sentences, state what changed "
+            "and why it might matter in practice. Describe the change only, no legal conclusion."
         ),
         user=f"Section {clause_ref} ({heading}) changed.\n\nOLD:\n{old_text}\n\nNEW:\n{new_text}",
-        max_tokens=400,
+        max_tokens=700,
     )
     if result:
         return result, ReasoningSource.OPENAI
@@ -79,6 +91,16 @@ def summarize_change(clause_ref: str, heading: str, old_text: str, new_text: str
     return " ".join(parts), ReasoningSource.HEURISTIC
 
 
+@dataclass
+class ImpactRecommendation:
+    explanation: str  # ~150-word human-readable analysis, shown in the comment/review card
+    conflicting_sentence: Optional[str]  # exact quote from the document, verbatim -- must match
+    # the document's actual text so document_editor.py can find and replace it. None if nothing
+    # in the document actually conflicts.
+    suggested_replacement: Optional[str]  # proposed replacement wording. None if no edit applies.
+    source: ReasoningSource
+
+
 def recommend_impact(
     document_name: str,
     document_text: str,
@@ -87,49 +109,61 @@ def recommend_impact(
     old_clause_text: str,
     new_clause_text: str,
     dependency_path: List[str],
-) -> Tuple[str, ReasoningSource]:
+) -> ImpactRecommendation:
     """document_text is the document's FULL content (not just the short
     citation excerpt) so the model can genuinely scan the whole document
     for passages that conflict with the new statute text, not just check
     the one sentence that triggered the dependency edge. document_excerpt
     is kept only for the heuristic fallback, which can't do that kind of
-    scan."""
+    scan.
+
+    conflicting_sentence/suggested_replacement are what let "Accept" apply
+    a real edit later (document_editor.py) -- they're always a suggestion
+    the model proposes, never applied by this function itself.
+    """
     path_desc = " -> ".join(dependency_path) if len(dependency_path) > 1 else None
 
-    result = _call_openai(
+    raw = _call_openai(
         system=(
-            "You are a legal-tech assistant reviewing a firm document against a change in the "
-            "underlying statute it relies on. You are given the OLD text of a statute section "
-            "the document was written against, the NEW (amended) text of that same section, and "
-            "the firm document's full text.\n\n"
-            "Based on the new version of the legislation, identify any inconsistencies between "
-            "the older version of the legislation used in the document and the new version. "
-            "Then highlight the specific sentences or passages in the document where the "
-            "reasoning follows the old, overruled statute in a way that contradicts the new, "
-            "amended statute. Quote the exact sentence(s) from the document that are now "
-            "inconsistent, and explain precisely why each one conflicts with the new text.\n\n"
-            "Base your analysis only on the OLD text, NEW text, and document text given below -- "
-            "do not rely on general knowledge of this or any other statute, and do not assume or "
-            "invent any provision, section, or legal context not literally shown here. If the "
-            "document does not actually rely on the part of the clause that changed, say so "
-            "plainly rather than manufacturing a concern. This is a suggestion for a human "
-            "lawyer to evaluate, never a conclusion or an instruction to edit the document."
+            "Legal-tech assistant. Given OLD statute text, NEW (amended) statute text, and a "
+            "firm document's full text: find the specific sentence in the document that conflicts "
+            "with the NEW text (because it was written assuming the OLD text). Base this only on "
+            "the text given -- no outside legal knowledge, no invented provisions.\n\n"
+            "Respond with strict JSON only: {\"explanation\": \"~150 word analysis of why this "
+            "conflicts, for a human lawyer to evaluate -- never an instruction to edit\", "
+            "\"conflicting_sentence\": \"the exact sentence copied verbatim from the document, or "
+            "null if nothing in the document actually conflicts\", \"suggested_replacement\": "
+            "\"proposed replacement wording for that sentence, or null\"}"
         ),
         user=(
             f"OLD statute text (what the document was written against):\n{old_clause_text}\n\n"
             f"NEW statute text (current law):\n{new_clause_text}\n\n"
-            f"Firm document '{document_name}' full text:\n{document_text[:4000]}\n\n"
+            f"Firm document '{document_name}' full text:\n{document_text[:2000]}\n\n"
             + (f"Note: this document is affected indirectly, via: {path_desc}\n" if path_desc else "")
         ),
-        max_tokens=500,
+        max_tokens=900,
+        json_mode=True,
     )
-    if result:
-        return result, ReasoningSource.OPENAI
+    if raw:
+        try:
+            data = json.loads(raw)
+            explanation = str(data.get("explanation", "")).strip()
+            if explanation:
+                return ImpactRecommendation(
+                    explanation=explanation,
+                    conflicting_sentence=data.get("conflicting_sentence") or None,
+                    suggested_replacement=data.get("suggested_replacement") or None,
+                    source=ReasoningSource.OPENAI,
+                )
+        except (json.JSONDecodeError, AttributeError):
+            pass  # falls through to heuristic below
 
     # The heuristic fallback cannot scan a document for conflicting
     # passages -- that requires actual reasoning. It stays honest about
-    # that limit rather than pretending to do the analysis above. Uses the
-    # actual diff ops (what was added/removed), not a naive first-N-chars
+    # that limit rather than pretending to do the analysis above, and
+    # never proposes a conflicting_sentence/suggested_replacement since it
+    # can't verify either against the real document text. Uses the actual
+    # diff ops (what was added/removed), not a naive first-N-chars
     # truncation of old vs new -- a change near the end of a long clause
     # (e.g. an appended sentence) would otherwise make truncated old/new
     # text look identical and say nothing useful.
@@ -144,15 +178,20 @@ def recommend_impact(
     change_desc = " and ".join(change_desc_parts) if change_desc_parts else "text changed"
 
     if path_desc:
-        text = (
+        explanation = (
             f"'{document_name}' depends on this change indirectly via {path_desc}. "
             f"Section {clause_ref} changed: {change_desc}. Automated passage-level comparison "
             f"requires an API key; manual review of '{document_name}' is recommended."
         )
     else:
-        text = (
+        explanation = (
             f"'{document_name}' cites section {clause_ref}, which changed: {change_desc}. "
             f'The cited excerpt was: "{document_excerpt[:150]}". Automated passage-level '
             f"comparison requires an API key; manual review of '{document_name}' is recommended."
         )
-    return text, ReasoningSource.HEURISTIC
+    return ImpactRecommendation(
+        explanation=explanation,
+        conflicting_sentence=None,
+        suggested_replacement=None,
+        source=ReasoningSource.HEURISTIC,
+    )

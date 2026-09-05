@@ -89,9 +89,17 @@ class FlagOut(BaseModel):
     via_document_name: Optional[str]
     recommendation_text: Optional[str]
     recommendation_source: Optional[str]
+    original_sentence: Optional[str]
+    suggested_replacement: Optional[str]
+    document_edited: bool
+    human_edit_text: Optional[str]
     status: str
     created_at: datetime.datetime
     highlighted_pdf_url: Optional[str]
+
+
+class SelfEditRequest(BaseModel):
+    human_edit_text: str
 
 
 class ScanClassifiedOut(BaseModel):
@@ -108,6 +116,7 @@ class ScanResultOut(BaseModel):
     new_documents: List[str]
     edges_created: int
     report_path: str
+    new_flags: List[FlagOut] = []  # flags raised immediately against pre-existing law changes
 
 
 class CheckSsoRequest(BaseModel):
