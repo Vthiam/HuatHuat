@@ -3,8 +3,6 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: '/HuatHuat/',
   plugins: [react()],
-  server: {
-    open: true,
-  },
 })
