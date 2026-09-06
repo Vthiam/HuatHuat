@@ -89,6 +89,7 @@ class FlagOut(BaseModel):
     via_document_name: Optional[str]
     recommendation_text: Optional[str]
     recommendation_source: Optional[str]
+    cited_excerpt: Optional[str]
     original_sentence: Optional[str]
     suggested_replacement: Optional[str]
     document_edited: bool
