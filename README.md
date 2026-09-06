@@ -136,7 +136,6 @@ pytest tests/ -m network         # +1 live smoke test against the real SSO site
 
 ## Known limitations
 
-- Only Part 1 (sections 1-4) of PDPA 2012 is tracked. SSO's Act pages lazy-load other Parts via an internal SPA endpoint that's deliberately not reverse-engineered here — tracking more sections is a `TRACKED_ACTS` config change (`app/config.py`), not an architecture change.
 - PDF highlighting is the only format with in-file annotation right now. A flagged `.docx` document still gets its recommendation surfaced in the report/CLI, just without a highlight drawn directly on the file.
 - Desktop notifications are macOS-only (`osascript`); every other platform gets a console log line instead of a crash.
 - Case-law ingestion isn't built — `Document.genre` already reserves a `CASE` value for it, so adding it later shouldn't require a schema change.
