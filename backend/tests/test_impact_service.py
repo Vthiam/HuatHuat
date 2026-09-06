@@ -228,3 +228,34 @@ def test_resolve_flag_reject_without_self_edit_leaves_document_untouched(db_sess
     assert resolved.document_edited is False
     assert resolved.human_edit_text is None
     assert (fake_library["templates"] / "sample_checklist.txt").read_text() == "Untouched original."
+
+
+def test_resolve_flag_reject_with_self_edit_but_no_original_sentence_still_saves_note(db_session, fake_library):
+    """A flag with no original_sentence (the AI found no specific sentence to
+    quote) has nothing to anchor a document edit against, but the human's
+    note should still be recorded rather than silently dropped."""
+    lib = build_sample_library(db_session)
+    (fake_library["templates"] / "sample_checklist.txt").write_text("Untouched original.")
+    db_session.commit()
+
+    flag = Flag(
+        change_event_id=_make_change_event(db_session, lib["clause"], "old", "new").id,
+        document_id=lib["template_a"].id,
+        flag_type=FlagType.DIRECT_DEPENDENCY,
+        depth=1,
+        recommendation_text="explanation",
+        recommendation_source=ReasoningSource.OPENAI,
+        original_sentence=None,
+        suggested_replacement=None,
+    )
+    db_session.add(flag)
+    db_session.commit()
+
+    resolved = impact_service.resolve_flag_reject(
+        db_session, flag, human_edit_text="Reviewed manually, no document change needed."
+    )
+
+    assert resolved.status == FlagStatus.REJECTED
+    assert resolved.human_edit_text == "Reviewed manually, no document change needed."
+    assert resolved.document_edited is False
+    assert (fake_library["templates"] / "sample_checklist.txt").read_text() == "Untouched original."

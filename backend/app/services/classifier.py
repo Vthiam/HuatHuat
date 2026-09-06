@@ -76,7 +76,11 @@ def _heuristic_classify(text: str) -> ClassificationResult:
     keyword_hits = sum(1 for kw in _STATUTE_KEYWORDS if kw in lower)
     numbered_sections = len(_NUMBERED_SECTION_RE.findall(text))
 
-    if keyword_hits >= 1 or numbered_sections >= 3:
+    # A single keyword hit is weak evidence on its own -- it can appear inside
+    # a firm document's verbatim quote of the statute, not just in the statute
+    # itself. Require corroboration: either a second distinct keyword, or the
+    # more structural numbered-sections signal.
+    if keyword_hits >= 2 or numbered_sections >= 3:
         confidence = min(0.55 + 0.12 * keyword_hits + 0.05 * numbered_sections, 0.95)
         return ClassificationResult(DocumentGenre.STATUTE, confidence, ReasoningSource.HEURISTIC)
 
@@ -96,13 +100,19 @@ def _call_openai_classify(text: str, filename: str) -> Optional[ClassificationRe
                 {
                     "role": "system",
                     "content": (
-                        "Classify a law firm's document as STATUTE (official legislation or "
-                        "regulation text) or TEMPLATE (the firm's own checklist, workflow, or "
-                        'advisory). Respond with strict JSON only: '
-                        '{"genre": "STATUTE"|"TEMPLATE", "confidence": 0.0-1.0}'
+                        "Classify a law firm's document as STATUTE (the document IS official "
+                        "legislation or regulation text in its entirety -- an Act, statutory "
+                        "instrument, or official amendment notice) or TEMPLATE (the firm's own "
+                        "checklist, workflow, memo, or advisory). A TEMPLATE may quote or excerpt "
+                        "legislation at length -- e.g. to explain internal policy -- and still be "
+                        "a TEMPLATE. Judge by whether the document ALSO contains the firm's own "
+                        "commentary, checklist items, or guidance addressed to firm staff, not by "
+                        "how much of the text sounds like legal language. Only classify as STATUTE "
+                        "when there is no separate firm-authored framing at all. Respond with "
+                        'strict JSON only: {"genre": "STATUTE"|"TEMPLATE", "confidence": 0.0-1.0}'
                     ),
                 },
-                {"role": "user", "content": f"Filename: {filename}\n\n{text[:2000]}"},
+                {"role": "user", "content": f"Filename: {filename}\n\n{text[:6000]}"},
             ],
             response_format={"type": "json_object"},
         )

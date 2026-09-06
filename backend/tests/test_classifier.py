@@ -46,6 +46,38 @@ def test_classifies_template_shaped_text_as_template():
     assert 0.0 < result.confidence <= 1.0
 
 
+QUOTE_HEAVY_TEMPLATE_TEXT = """
+PDPA Interpretation Quick Reference (Firm Template)
+
+A quick reference to a few of the PDPA's core defined terms, for staff who
+need a fast answer without reading the full Act.
+
+Relevant PDPA provisions
+
+Section 1 (Short title and commencement): "This Act may be cited as the
+Personal Data Protection Act 2012 and shall come into operation on such
+date as the Minister may, by notification in the Gazette, appoint."
+
+Section 2 (Interpretation): "'individual' means a natural person, whether
+living or deceased."
+
+Internal guidance
+
+'Individual' under Section 2 includes deceased persons -- do not assume
+PDPA definitions stop applying at death; see the separate retention policy
+for what changes.
+"""
+
+
+def test_quote_heavy_template_is_not_misclassified_as_statute():
+    """Regression test: a firm template that verbatim-quotes statute text
+    (including phrases like "short title" that trip the keyword heuristic)
+    must still classify as TEMPLATE, not STATUTE, as long as it also carries
+    its own firm-authored framing/guidance around the quotes."""
+    result = classify_document(QUOTE_HEAVY_TEMPLATE_TEXT, filename="pdpa_interpretation_quick_reference.txt")
+    assert result.genre == DocumentGenre.TEMPLATE
+
+
 TRACKED = [{"act_id": "SAMPLEACT2024", "name": "Sample Act 2024", "clause_refs": ["4"]}]
 
 

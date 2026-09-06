@@ -169,19 +169,24 @@ def resolve_flag_accept(db: Session, flag: Flag) -> Flag:
 
 def resolve_flag_reject(db: Session, flag: Flag, human_edit_text: Optional[str] = None) -> Flag:
     """Rejects the AI's specific suggested wording. If the human supplies
-    their own replacement text (self-edit), it's applied in place of
-    original_sentence the same way an accepted edit would be -- this is
-    "reject the AI's answer, but still make the correction, in my own
-    words" rather than "do nothing". Requires original_sentence to exist
-    (something concrete to replace); with no self-edit text supplied, this
-    is just a plain rejection with no document change."""
+    their own text (self-edit), it's always recorded on the flag as an
+    audit trail of why/how they rejected it. When original_sentence also
+    exists, that text is additionally applied to the real document in
+    place of original_sentence -- the same way an accepted edit would be --
+    so this becomes "reject the AI's answer, but still make the
+    correction, in my own words" rather than just "do nothing". Without
+    original_sentence there's no anchor to edit the document against, so
+    the human's text is kept purely as a note. With no self-edit text
+    supplied at all, this is just a plain rejection with no note or
+    document change."""
     flag.status = FlagStatus.REJECTED
     flag.resolved_at = datetime.datetime.utcnow()
 
-    if human_edit_text and flag.original_sentence:
+    if human_edit_text:
         flag.human_edit_text = human_edit_text
-        applied = document_editor.apply_edit(flag.document, flag.original_sentence, human_edit_text)
-        flag.document_edited = flag.document_edited or applied
+        if flag.original_sentence:
+            applied = document_editor.apply_edit(flag.document, flag.original_sentence, human_edit_text)
+            flag.document_edited = flag.document_edited or applied
 
     db.commit()
     return flag

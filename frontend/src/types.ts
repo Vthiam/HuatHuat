@@ -73,6 +73,10 @@ export interface Flag {
   via_document_name: string | null;
   recommendation_text: string | null;
   recommendation_source: string | null;
+  original_sentence: string | null;
+  suggested_replacement: string | null;
+  document_edited: boolean;
+  human_edit_text: string | null;
   status: "pending" | "accepted" | "rejected";
   created_at: string;
   highlighted_pdf_url: string | null;
