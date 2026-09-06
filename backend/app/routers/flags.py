@@ -47,6 +47,7 @@ def _to_out(flag: Flag) -> schemas.FlagOut:
         via_document_name=flag.via_document.name if flag.via_document else None,
         recommendation_text=flag.recommendation_text,
         recommendation_source=_enum_value(flag.recommendation_source),
+        cited_excerpt=flag.cited_excerpt,
         original_sentence=flag.original_sentence,
         suggested_replacement=flag.suggested_replacement,
         document_edited=flag.document_edited,

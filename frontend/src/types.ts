@@ -73,6 +73,7 @@ export interface Flag {
   via_document_name: string | null;
   recommendation_text: string | null;
   recommendation_source: string | null;
+  cited_excerpt: string | null;
   original_sentence: string | null;
   suggested_replacement: string | null;
   document_edited: boolean;

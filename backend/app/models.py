@@ -206,6 +206,14 @@ class Flag(Base):
     via_document_id = Column(Integer, ForeignKey("documents.id"), nullable=True)  # set for transitive flags
     recommendation_text = Column(Text, nullable=True)
     recommendation_source = Column(SAEnum(ReasoningSource), nullable=True)
+    # The literal passage in THIS document that cites the changed clause (or,
+    # for a transitive flag, cites the intermediate document) -- from the
+    # DependencyEdge captured at ingestion time. Always available regardless
+    # of whether the AI found a specific conflicting_sentence, since it's a
+    # deterministic lookup, not a model output. This is what actually answers
+    # "which part of this document is connected to the law change" -- shown
+    # in the UI ahead of the AI's optional explanation/suggested edit.
+    cited_excerpt = Column(Text, nullable=True)
     # original_sentence/suggested_replacement are the AI's proposed edit --
     # always a suggestion, never applied by anything that creates a Flag.
     # Only accepting the flag (see cli.py/routers/flags.py) applies

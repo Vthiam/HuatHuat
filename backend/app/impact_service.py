@@ -125,6 +125,7 @@ def process_change_event(db: Session, change_event: ChangeEvent) -> List[Flag]:
             via_document_id=item.via_document.id if item.via_document else None,
             recommendation_text=rec.explanation,
             recommendation_source=rec.source,
+            cited_excerpt=excerpt or None,
             original_sentence=verified_sentence,
             suggested_replacement=verified_replacement,
         )

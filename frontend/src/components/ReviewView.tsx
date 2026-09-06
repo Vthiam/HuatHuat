@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import ReactFlow, { Background } from "reactflow";
+import ReactFlow, { Background, type Node as FlowNode } from "reactflow";
 import "reactflow/dist/style.css";
 import { api, BASE_URL } from "../api";
 import { HIGHLIGHT_COLOR, layout } from "./graphLayout";
@@ -67,21 +67,35 @@ function FlagReviewPanel({
         <div className="meta">depends on this indirectly, via {flag.via_document_name}</div>
       )}
 
+      {flag.cited_excerpt && (
+        <>
+          <div className="panel-title" style={{ marginTop: 16 }}>
+            Where this document is affected
+          </div>
+          <div className="cited-excerpt">&ldquo;{flag.cited_excerpt}&rdquo;</div>
+        </>
+      )}
+
       <div className="panel-title" style={{ marginTop: 16 }}>
-        AI assessment for this document
+        AI assessment
       </div>
       <div className="recommendation">{flag.recommendation_text}</div>
 
-      {flag.original_sentence && flag.suggested_replacement && (
+      {flag.original_sentence && flag.suggested_replacement ? (
         <>
           <div className="panel-title" style={{ marginTop: 4 }}>
-            Suggested edit to this document
+            What the AI wants to change
           </div>
           <div className="diff-block">
             <div className="diff-line diff-delete">{flag.original_sentence}</div>
             <div className="diff-line diff-insert">{flag.suggested_replacement}</div>
           </div>
         </>
+      ) : (
+        <p className="self-edit-hint">
+          The AI didn't find one specific sentence to rewrite here -- use the excerpt above and
+          the assessment to judge for yourself, then Accept, Reject, or Reject with your own edit.
+        </p>
       )}
 
       {flag.human_edit_text && <div className="meta">Your note: "{flag.human_edit_text}"</div>}
@@ -276,6 +290,19 @@ export function ReviewView() {
 
   const selectedFlag = documentFlags.find((f) => f.id === selectedFlagId) ?? null;
 
+  const reviewSectionRef = useRef<HTMLDivElement>(null);
+
+  const handleNodeClick = (_: unknown, node: FlowNode) => {
+    const match = node.id.match(/^doc-(\d+)$/);
+    if (!match) return; // the clause node, or a node with no id we recognise
+    const documentId = Number(match[1]);
+    const flag = flags.find((f) => f.change_event_id === selectedId && f.document_id === documentId);
+    if (!flag) return; // the root statute-document node -- nothing to review
+    setStatusFilter(flag.status);
+    setSelectedFlagId(flag.id);
+    reviewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+
   return (
     <div>
       {error && <div className="error-box">{error}</div>}
@@ -374,7 +401,11 @@ export function ReviewView() {
                 </>
               )}
 
-              <div className="controls-row" style={{ marginTop: 20, marginBottom: 12, paddingBottom: 12 }}>
+              <div
+                ref={reviewSectionRef}
+                className="controls-row"
+                style={{ marginTop: 20, marginBottom: 12, paddingBottom: 12 }}
+              >
                 <div className="panel-title" style={{ marginBottom: 0 }}>
                   Review a document
                 </div>
@@ -461,8 +492,11 @@ export function ReviewView() {
                   Transitive
                 </span>
               </div>
+              <p className="meta" style={{ marginTop: -8, marginBottom: 10 }}>
+                Click a direct or transitive document to review it below.
+              </p>
               <div className="graph-wrap">
-                <ReactFlow nodes={nodes} edges={edges} fitView>
+                <ReactFlow nodes={nodes} edges={edges} onNodeClick={handleNodeClick} fitView>
                   <Background />
                 </ReactFlow>
               </div>
