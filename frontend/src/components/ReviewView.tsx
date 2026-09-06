@@ -177,7 +177,17 @@ export function ReviewView() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [graphExpanded, setGraphExpanded] = useState(false);
   const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    if (!graphExpanded) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setGraphExpanded(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [graphExpanded]);
 
   const loadChanges = async () => {
     try {
@@ -300,6 +310,7 @@ export function ReviewView() {
     if (!flag) return; // the root statute-document node -- nothing to review
     setStatusFilter(flag.status);
     setSelectedFlagId(flag.id);
+    setGraphExpanded(false); // so the update is actually visible, not hidden behind the fullscreen graph
     reviewSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
 
@@ -466,10 +477,12 @@ export function ReviewView() {
             </motion.div>
           </AnimatePresence>
 
+          {graphExpanded && <div className="graph-backdrop" onClick={() => setGraphExpanded(false)} />}
+
           <AnimatePresence mode="wait">
             <motion.div
               key={selectedId ?? "none"}
-              className="panel review-col-graph"
+              className={`panel review-col-graph ${graphExpanded ? "expanded" : ""}`}
               initial={{ opacity: 0, filter: "blur(2px)" }}
               animate={{ opacity: 1, filter: "blur(0px)" }}
               exit={{ opacity: 0 }}
@@ -496,9 +509,37 @@ export function ReviewView() {
                 Click a direct or transitive document to review it below.
               </p>
               <div className="graph-wrap">
-                <ReactFlow nodes={nodes} edges={edges} onNodeClick={handleNodeClick} fitView>
+                <ReactFlow
+                  key={graphExpanded ? "expanded" : "normal"}
+                  nodes={nodes}
+                  edges={edges}
+                  onNodeClick={handleNodeClick}
+                  fitView
+                >
                   <Background />
                 </ReactFlow>
+                <button
+                  className="expand-toggle"
+                  onClick={() => setGraphExpanded((v) => !v)}
+                  aria-label={graphExpanded ? "Collapse graph" : "Expand graph"}
+                  title={graphExpanded ? "Collapse" : "Expand"}
+                >
+                  {graphExpanded ? (
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+                      <path d="M21 8h-3a2 2 0 0 1-2-2V3" />
+                      <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+                      <path d="M16 21v-3a2 2 0 0 1 2-2h3" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+                      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+                      <path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+                      <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+                    </svg>
+                  )}
+                </button>
               </div>
             </motion.div>
           </AnimatePresence>
