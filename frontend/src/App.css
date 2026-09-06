@@ -313,6 +313,18 @@ button + button {
   flex: 1;
 }
 
+.cited-excerpt {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--text);
+  background: var(--accent-soft);
+  border-left: 3px solid var(--accent);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  line-height: 1.55;
+  margin: 8px 0;
+}
+
 .recommendation {
   font-size: 13.5px;
   color: var(--text);
@@ -412,7 +424,8 @@ button + button {
 }
 
 .graph-wrap {
-  height: 420px;
+  height: min(75vh, 720px);
+  min-height: 420px;
   background: var(--panel-wash);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
@@ -437,7 +450,7 @@ button + button {
 
 .review-columns {
   display: grid;
-  grid-template-columns: minmax(200px, 0.7fr) minmax(360px, 1.8fr) minmax(280px, 1.1fr);
+  grid-template-columns: minmax(200px, 0.6fr) minmax(360px, 1.5fr) minmax(340px, 1.3fr);
   gap: 20px;
   align-items: start;
 }

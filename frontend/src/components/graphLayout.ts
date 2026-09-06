@@ -24,6 +24,7 @@ export function layout(graph: Graph): { nodes: Node[]; edges: Edge[] } {
     const spacing = 220;
     const totalWidth = (levelNodes.length - 1) * spacing;
     levelNodes.forEach((n, i) => {
+      const isReviewable = n.highlight === "direct" || n.highlight === "transitive";
       nodes.push({
         id: n.id,
         position: { x: i * spacing - totalWidth / 2, y: lvl * 130 },
@@ -35,6 +36,7 @@ export function layout(graph: Graph): { nodes: Node[]; edges: Edge[] } {
           padding: 8,
           fontSize: 12,
           width: 190,
+          cursor: isReviewable ? "pointer" : "default",
           transition: "background 200ms ease, border-color 200ms ease",
         },
       });
