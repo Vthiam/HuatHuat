@@ -2,11 +2,12 @@ venv/
 __pycache__/
 *.pyc
 .env
-backend/data/*.db
+backend/data/
 node_modules/
 dist/
 .DS_Store
 
 # Generated at runtime -- regenerate via `python -m app.cli scan` / `check-sso`
 law_library/reports/*.md
+law_library/reports/*.json
 law_library/reports/flagged/*.pdf
